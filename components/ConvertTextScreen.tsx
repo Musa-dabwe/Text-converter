@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { AppScreen, FileFormat } from '../types';
 import { useFiles } from '../context/FileContext';
 import FileDisplay from './ui/FileDisplay';
@@ -11,6 +11,8 @@ import rehypeRaw from 'rehype-raw'; // To handle raw HTML within markdown
 interface ConvertTextScreenProps {
   navigateTo: (screen: AppScreen) => void;
 }
+
+type ApiKeyStatus = 'checking' | 'missing' | 'available';
 
 // Utility function to convert File to Base64
 const fileToBase64 = (file: File): Promise<string> => {
@@ -38,10 +40,48 @@ const ConvertTextScreen: React.FC<ConvertTextScreenProps> = ({ navigateTo }) => 
   const [imageConversionResult, setImageConversionResult] = useState<string | null>(null);
   const [isGeneratingImageCode, setIsGeneratingImageCode] = useState(false); // For AI image conversion specific loading
 
-
   const [loading, setLoading] = useState(false); // For general loading (file read/download)
   const [message, setMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // API Key Management State
+  const [apiKeyStatus, setApiKeyStatus] = useState<ApiKeyStatus>('checking');
+
+  useEffect(() => {
+    const checkApiKey = async () => {
+      // Clear previous messages related to API key when re-checking
+      if (apiKeyStatus === 'missing') setMessage(null); 
+      
+      if (process.env.API_KEY && process.env.API_KEY.length > 0) {
+        setApiKeyStatus('available');
+      } else if (window.aistudio && await window.aistudio.hasSelectedApiKey()) {
+        // Assume key is available or will be injected if selected via dialog
+        setApiKeyStatus('available');
+      } else {
+        setApiKeyStatus('missing');
+        setMessage('AI features require a Google AI API Key.');
+      }
+    };
+    checkApiKey();
+  }, [apiKeyStatus]); // Re-run if apiKeyStatus changes to re-evaluate after selection
+
+  const handleSelectApiKey = useCallback(async () => {
+    if (window.aistudio) {
+      setMessage('Opening API Key selection dialog...');
+      try {
+        await window.aistudio.openSelectKey();
+        // Optimistically assume success due to race condition guidance
+        setApiKeyStatus('available');
+        setMessage('API Key selected successfully!');
+      } catch (error) {
+        console.error('Error opening API key selection:', error);
+        setMessage('Failed to open API Key selection. Please try again.');
+        setApiKeyStatus('missing'); // Revert if something went wrong opening the dialog
+      }
+    } else {
+      setMessage('API Key selection not supported in this environment.');
+    }
+  }, []);
 
   // Helper function to detect file format
   const detectFileFormat = (fileName: string, mimeType: string): FileFormat => {
@@ -77,7 +117,7 @@ const ConvertTextScreen: React.FC<ConvertTextScreenProps> = ({ navigateTo }) => 
       case 'JSON': return 'JSON data';
       case 'CSS': return 'CSS stylesheets';
       case 'JS': return 'JavaScript code';
-      case 'XML': return 'XML markup';
+      case 'XML': 'XML markup';
       case 'CSV': return 'Comma Separated Values';
       case 'YAML': return 'YAML data';
       default: return 'unspecified format';
@@ -135,6 +175,10 @@ const ConvertTextScreen: React.FC<ConvertTextScreenProps> = ({ navigateTo }) => 
       setMessage('Editor is empty. Please enter some text to download.');
       return;
     }
+    if (apiKeyStatus !== 'available') {
+      setMessage('API Key not available. Please select an API key to enable AI conversion.');
+      return;
+    }
 
     setLoading(true);
     setMessage(null);
@@ -142,50 +186,50 @@ const ConvertTextScreen: React.FC<ConvertTextScreenProps> = ({ navigateTo }) => 
     const defaultFileName = selectedFile?.name.split('.').slice(0, -1).join('.') || `Untitled_${Date.now()}`;
 
     try {
-      if (!process.env.API_KEY) {
-        setMessage('API Key not configured. AI conversion skipped. Downloading original content.');
-      } else {
-        setIsConvertingAI(true);
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const formatDescription = getFileFormatDescription(selectedFormat);
-        const inputFormatDescription = getFileFormatDescription(detectFileFormat(selectedFile?.name || 'temp.txt', selectedFile?.mimeType || 'text/plain'));
+      setIsConvertingAI(true);
+      // Create GoogleGenAI instance right before API call
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string }); 
+      const formatDescription = getFileFormatDescription(selectedFormat);
+      const inputFormatDescription = selectedFile?.name ? getFileFormatDescription(detectFileFormat(selectedFile.name, selectedFile.mimeType)) : 'plain text';
 
-        setMessage(`AI is converting content from ${inputFormatDescription} to ${formatDescription}...`);
+      setMessage(`AI is converting content from ${inputFormatDescription} to ${formatDescription}...`);
 
-        const prompt = `You are a highly accurate file format converter. Convert the following content from ${inputFormatDescription} to ${formatDescription} format. Ensure all syntax, structure, and formatting conform strictly to the target format's standards. Do not add any introductory or concluding remarks, explanations, or extraneous text; provide only the converted content.
+      const prompt = `You are a highly accurate file format converter. Convert the following content from ${inputFormatDescription} to ${formatDescription} format. Ensure all syntax, structure, and formatting conform strictly to the target format's standards. Do not add any introductory or concluding remarks, explanations, or extraneous text; provide only the converted content.
 
 Content to convert:
 \`\`\`
 ${editorContent}
 \`\`\`
 `;
-        const response: GenerateContentResponse = await ai.models.generateContent({
-          model: 'gemini-2.5-flash', // Use gemini-2.5-flash for text conversion
-          contents: prompt,
-          config: {
-            temperature: 0.1, // Lower temperature for more deterministic output
-            topK: 1, // Focus on highest probability tokens
-            topP: 0.9,
-          }
-        });
-
-        const aiText = response.text.trim();
-        if (aiText) {
-          contentToDownload = aiText;
-          setMessage(`AI conversion complete. Preparing to download "${defaultFileName}.${selectedFormat.toLowerCase()}".`);
-        } else {
-          setMessage('AI conversion returned empty content. Downloading original content.');
+      const response: GenerateContentResponse = await ai.models.generateContent({
+        model: 'gemini-2.5-flash', // Use gemini-2.5-flash for text conversion
+        contents: prompt,
+        config: {
+          temperature: 0.1, // Lower temperature for more deterministic output
+          topK: 1, // Focus on highest probability tokens
+          topP: 0.9,
         }
-      }
+      });
 
-      downloadFile(defaultFileName, contentToDownload, selectedFormat);
-      if (!message || message.includes('AI conversion returned empty') || message.includes('AI conversion skipped')) {
-        setMessage(`Successfully downloaded "${defaultFileName}.${selectedFormat.toLowerCase()}".`);
+      const aiText = response.text.trim();
+      if (aiText) {
+        contentToDownload = aiText;
+        setMessage(`AI conversion complete. Preparing to download "${defaultFileName}.${selectedFormat.toLowerCase()}".`);
+      } else {
+        setMessage('AI conversion returned empty content. Downloading original content.');
       }
+      
+      downloadFile(defaultFileName, contentToDownload, selectedFormat);
+      setMessage(`Successfully downloaded "${defaultFileName}.${selectedFormat.toLowerCase()}".`);
 
     } catch (error: any) {
       console.error('Error during AI conversion or download:', error);
-      setMessage(`Operation failed: ${error.message || 'Unknown error during conversion or download.'}`);
+      let errorMessage = `Operation failed: ${error.message || 'Unknown error during conversion or download.'}`;
+      if (error.message.includes("Requested entity was not found.")) {
+        errorMessage = "Failed to generate content. This often indicates an invalid or expired API key. Please select your API key again.";
+        setApiKeyStatus('missing'); // Prompt user to re-select API key
+      }
+      setMessage(errorMessage);
     } finally {
       setLoading(false);
       setIsConvertingAI(false);
@@ -206,8 +250,8 @@ ${editorContent}
       setMessage('Please upload an image first.');
       return;
     }
-    if (!process.env.API_KEY) {
-      setMessage('API Key not configured. Image-to-code generation skipped.');
+    if (apiKeyStatus !== 'available') {
+      setMessage('API Key not available. Please select an API key to enable AI image-to-code generation.');
       return;
     }
 
@@ -216,7 +260,8 @@ ${editorContent}
     setMessage('Generating Android UI XML and Kotlin code from image...');
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      // Create GoogleGenAI instance right before API call
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
       // Remove "data:image/jpeg;base64," prefix from base64 string
       const base64Stripped = selectedImageBase64.split(',')[1]; 
 
@@ -260,6 +305,9 @@ Do not include any other introductory or concluding text outside of the requeste
       let errorMessage = 'Unknown error during AI image-to-code conversion.';
       if (error.message.includes("Rpc failed due to xhr error") || error.code === 500) {
         errorMessage = `Failed to generate code: There was an issue connecting to the AI service. This might be due to a temporary network problem, or an issue with your API key configuration (e.g., billing, permissions). Please ensure your API key is valid and properly set up, and try again. Detailed error: ${error.message}`;
+      } else if (error.message.includes("Requested entity was not found.")) {
+        errorMessage = "Failed to generate content. This often indicates an invalid or expired API key. Please select your API key again.";
+        setApiKeyStatus('missing'); // Prompt user to re-select API key
       } else {
         errorMessage = `Failed to generate code: ${error.message || 'Unknown error.'}`;
       }
@@ -276,18 +324,21 @@ Do not include any other introductory or concluding text outside of the requeste
         <button
           key={format}
           onClick={() => setSelectedFormat(format)}
+          disabled={apiKeyStatus !== 'available'} // Disable format selection if no API key
           className={`flex h-12 cursor-pointer items-center justify-center gap-x-2 rounded-lg
-            ${selectedFormat === format
+            ${selectedFormat === format && apiKeyStatus === 'available'
               ? 'bg-primary/10 border-2 border-primary ring-2 ring-primary/20 text-primary font-bold'
               : 'bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark text-text-light dark:text-text-dark font-medium'
-            } text-sm leading-normal transition-colors`}>
+            } text-sm leading-normal transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:text-subtext-light dark:disabled:text-subtext-dark disabled:border-border-light dark:disabled:border-border-dark`}>
           {format}
         </button>
       ))}
     </div>
   );
 
-  const isSaveDisabled = loading || isConvertingAI || isGeneratingImageCode;
+  const isSaveDisabled = loading || isConvertingAI || isGeneratingImageCode || apiKeyStatus !== 'available';
+  const isImageGenerateDisabled = isSaveDisabled || !selectedImageBase64;
+  const isUploadDisabled = loading || apiKeyStatus !== 'available'; // Disable file input if no API key
 
   // Custom components for ReactMarkdown to apply Tailwind CSS
   const markdownComponents = {
@@ -377,6 +428,34 @@ Do not include any other introductory or concluding text outside of the requeste
         </button>
       </div>
 
+      {/* API Key Status / Selection */}
+      {apiKeyStatus === 'checking' && (
+        <div className="p-4 flex items-center justify-center text-subtext-light dark:text-subtext-dark">
+          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary mr-2"></div>
+          Checking API key status...
+        </div>
+      )}
+      {apiKeyStatus === 'missing' && (
+        <div className="p-4 mx-4 mb-4 rounded-lg bg-red-100 dark:bg-red-900 border border-red-300 dark:border-red-700 text-red-800 dark:text-red-200 shadow-md">
+          <div className="flex items-center mb-2">
+            <span className="material-symbols-outlined text-xl mr-2">key</span>
+            <h2 className="font-bold text-lg">Google AI API Key Required</h2>
+          </div>
+          <p className="text-sm mb-3">
+            AI features (conversion, image-to-code) need an API key. Please select an API key to enable these functionalities.
+          </p>
+          <p className="text-xs mb-4">
+            Learn more about billing <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-red-700 dark:text-red-300 underline hover:no-underline">here</a>.
+          </p>
+          <button
+            onClick={handleSelectApiKey}
+            className="flex w-full items-center justify-center gap-x-2 rounded-lg bg-red-600 px-6 py-3 text-base font-bold text-white shadow-lg transition-colors hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-background-dark">
+            <span className="material-symbols-outlined">key</span>
+            Select API Key
+          </button>
+        </div>
+      )}
+
       <main className="flex flex-col flex-1 p-4 gap-6">
         {/* Conditional rendering based on conversionMode */}
         {conversionMode === 'text-to-text' ? (
@@ -386,7 +465,8 @@ Do not include any other introductory or concluding text outside of the requeste
                 <h2 className="text-text-light dark:text-text-dark text-lg font-bold leading-tight tracking-[-0.015em]">Selected File</h2>
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="text-primary text-sm font-medium">
+                  disabled={isUploadDisabled}
+                  className="text-primary text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed">
                   Change
                 </button>
                 <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".txt,.md,.html,.json,.css,.js,.xml,.csv,.yaml,.yml,text/*,application/json,application/javascript,application/xml" />
@@ -402,11 +482,13 @@ Do not include any other introductory or concluding text outside of the requeste
             <div className="flex flex-col gap-2">
               <h2 className="text-text-light dark:text-text-dark text-lg font-bold leading-tight tracking-[-0.015em]">Edit Content</h2>
               <textarea
-                className="form-textarea w-full min-h-[150px] resize-y rounded-lg border border-border-light bg-card-light px-4 py-3 text-base font-normal leading-normal text-text-light placeholder-subtext-light focus:outline-none focus:ring-2 focus:ring-primary dark:border-border-dark dark:bg-card-dark dark:text-text-dark dark:placeholder-subtext-dark"
+                className="form-textarea w-full min-h-[150px] resize-y rounded-lg border border-border-light bg-card-light px-4 py-3 text-base font-normal leading-normal text-text-light placeholder-subtext-light focus:outline-none focus:ring-2 focus:ring-primary dark:border-border-dark dark:bg-card-dark dark:text-text-dark dark:placeholder-subtext-dark disabled:opacity-50 disabled:bg-slate-100 dark:disabled:bg-slate-800 disabled:cursor-not-allowed"
                 placeholder="Start typing or load a file..."
                 value={editorContent}
                 onChange={(e) => setEditorContent(e.target.value)}
+                disabled={apiKeyStatus !== 'available'} // Disable editor if no API key
               ></textarea>
+              <p className="text-right text-xs text-subtext-light dark:text-subtext-dark mt-1">Character count: {editorContent.length}</p>
             </div>
 
             <div className="flex flex-col gap-4">
@@ -424,7 +506,8 @@ Do not include any other introductory or concluding text outside of the requeste
                 <h2 className="text-text-light dark:text-text-dark text-lg font-bold leading-tight tracking-[-0.015em]">Upload UI Mockup Image</h2>
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="text-primary text-sm font-medium">
+                  disabled={isUploadDisabled}
+                  className="text-primary text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed">
                   {selectedImageFile ? 'Change Image' : 'Select Image'}
                 </button>
                 <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
@@ -452,7 +535,9 @@ Do not include any other introductory or concluding text outside of the requeste
               <div
                 className="markdown-output bg-card-light dark:bg-card-dark rounded-lg p-4 font-mono text-sm overflow-auto max-h-[500px] border border-border-light dark:border-border-dark"
               >
-                {imageConversionResult ? (
+                {apiKeyStatus !== 'available' && !imageConversionResult ? (
+                   <span className="text-subtext-light dark:text-subtext-dark">Please select an API key to enable AI code generation.</span>
+                ) : imageConversionResult ? (
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[rehypeRaw]}
@@ -486,7 +571,7 @@ Do not include any other introductory or concluding text outside of the requeste
             </p>
           </div>
         )}
-        {(message && !(loading || isConvertingAI || isGeneratingImageCode) || fileError) && ( // Display message if not loading, or if fileError
+        {(message && !(loading || isConvertingAI || isGeneratingImageCode) && apiKeyStatus !== 'checking' || fileError) && ( // Display message if not loading, or if fileError
           <p className={`text-center text-sm ${message?.includes('Successfully') || message?.includes('generated successfully') || message?.includes('downloaded') ? 'text-green-500' : 'text-red-500'}`}>
             {message || fileError}
           </p>
@@ -503,7 +588,7 @@ Do not include any other introductory or concluding text outside of the requeste
         ) : (
           <button
             onClick={imageConversionResult ? handleDownloadMarkdown : handleGenerateImageCode}
-            disabled={isSaveDisabled || !selectedImageBase64}
+            disabled={isImageGenerateDisabled}
             className="flex w-full min-w-[84px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-4 bg-primary text-white text-base font-bold leading-normal tracking-[0.015em] disabled:opacity-50 disabled:cursor-not-allowed">
             <span className="truncate">
               {imageConversionResult ? 'Download Generated Markdown' : 'Generate UI Code'}

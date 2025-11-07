@@ -1,16 +1,16 @@
 import React, { useState } from 'react';
 import { AppScreen } from '../types';
 import HistoryTab from './HistoryTab';
-// import SettingsTab from './SettingsTab'; // Removed SettingsTab
+import SettingsTab from './SettingsTab'; // Import SettingsTab
 
 interface MyFilesScreenProps {
   navigateTo: (screen: AppScreen) => void;
 }
 
-// type MyFilesTab = 'history' | 'settings'; // Removed tab type
+type MyFilesTab = 'history' | 'settings'; // Reintroduced tab type
 
 const MyFilesScreen: React.FC<MyFilesScreenProps> = ({ navigateTo }) => {
-  // const [activeTab, setActiveTab] = useState<MyFilesTab>('history'); // Removed activeTab state
+  const [activeTab, setActiveTab] = useState<MyFilesTab>('history'); // Reintroduced activeTab state
 
   return (
     <div className="relative mx-auto flex h-auto min-h-screen w-full max-w-md flex-col overflow-x-hidden bg-background-light dark:bg-background-dark">
@@ -22,8 +22,8 @@ const MyFilesScreen: React.FC<MyFilesScreenProps> = ({ navigateTo }) => {
         </button>
       </div>
 
-      {/* Tabs - Removed tab navigation entirely */}
-      {/* <div>
+      {/* Tabs - Reintroduced tab navigation */}
+      <div>
         <div className="border-b border-border-light dark:border-border-dark px-4">
           <nav className="flex justify-between -mb-px">
             <button
@@ -40,11 +40,12 @@ const MyFilesScreen: React.FC<MyFilesScreenProps> = ({ navigateTo }) => {
             </button>
           </nav>
         </div>
-      </div> */}
+      </div>
 
-      {/* Content now always shows HistoryTab */}
+      {/* Content now conditionally shows HistoryTab or SettingsTab */}
       <div className="flex flex-col flex-1">
-        <HistoryTab navigateTo={navigateTo} />
+        {activeTab === 'history' && <HistoryTab navigateTo={navigateTo} />}
+        {activeTab === 'settings' && <SettingsTab />}
       </div>
 
       {/* Floating Action Button */}

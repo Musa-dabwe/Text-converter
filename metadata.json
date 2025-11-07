@@ -3,5 +3,8 @@
   "description": "A simple text editor and converter application with Google Drive integration.",
   "requestFramePermissions": [
     "camera"
+  ],
+  "permission": [
+    "API_KEY_MANAGEMENT"
   ]
 }
