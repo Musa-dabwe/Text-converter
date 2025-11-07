@@ -6,6 +6,7 @@ const SettingsTab: React.FC = () => {
   const [apiKeyStatus, setApiKeyStatus] = useState<ApiKeyStatus>('checking');
   const [message, setMessage] = useState<string | null>(null);
 
+  // Fix: Replace `import.meta.env.VITE_API_KEY` with `process.env.API_KEY` as per coding guidelines.
   const checkApiKey = useCallback(async () => {
     setMessage(null); // Clear messages when re-checking
     setApiKeyStatus('checking');
@@ -13,7 +14,8 @@ const SettingsTab: React.FC = () => {
     const isAistudioEnvironment = typeof window.aistudio !== 'undefined' && typeof window.aistudio.hasSelectedApiKey === 'function';
     let keyIsConfigured = false;
 
-    // Check process.env.API_KEY first (for external deployments like Netlify)
+    // Check client-side exposed env var first (e.g., VITE_API_KEY for Vite-like bundlers)
+    // Use process.env for API key, as mandated by coding guidelines.
     if (process.env.API_KEY && process.env.API_KEY.length > 0) {
       keyIsConfigured = true;
     } 
@@ -35,7 +37,8 @@ const SettingsTab: React.FC = () => {
       if (isAistudioEnvironment) {
         setMessage('No Google AI API Key detected. Please select one to enable AI features.');
       } else {
-        setMessage('No Google AI API Key detected. For this environment, configure your API Key as an environment variable (e.g., `API_KEY`) in your deployment platform (e.g., Netlify, Vercel) settings.');
+        // Fix: Update message to refer to `API_KEY` instead of `VITE_API_KEY`.
+        setMessage('No Google AI API Key detected. For this environment, configure your API Key as an environment variable (`API_KEY`) in your deployment platform (e.g., Netlify, Vercel) settings.');
       }
     }
   }, []); // No dependencies for checkApiKey itself, it should be stable

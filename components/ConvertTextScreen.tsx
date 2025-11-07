@@ -47,6 +47,7 @@ const ConvertTextScreen: React.FC<ConvertTextScreenProps> = ({ navigateTo }) => 
   // API Key Management State
   const [apiKeyStatus, setApiKeyStatus] = useState<ApiKeyStatus>('checking');
 
+  // Fix: Replace `import.meta.env.VITE_API_KEY` with `process.env.API_KEY` as per coding guidelines.
   const checkApiKey = useCallback(async () => {
     setMessage(null); // Clear messages when re-checking
     setApiKeyStatus('checking');
@@ -54,7 +55,8 @@ const ConvertTextScreen: React.FC<ConvertTextScreenProps> = ({ navigateTo }) => 
     const isAistudioEnvironment = typeof window.aistudio !== 'undefined' && typeof window.aistudio.hasSelectedApiKey === 'function';
     let keyIsConfigured = false;
 
-    // Check process.env.API_KEY first (for external deployments like Netlify)
+    // Check client-side exposed env var first (e.g., VITE_API_KEY for Vite-like bundlers)
+    // Use process.env for API key, as mandated by coding guidelines.
     if (process.env.API_KEY && process.env.API_KEY.length > 0) {
       keyIsConfigured = true;
     } 
@@ -76,7 +78,8 @@ const ConvertTextScreen: React.FC<ConvertTextScreenProps> = ({ navigateTo }) => 
       if (isAistudioEnvironment) {
         setMessage('AI features require a Google AI API Key. Please select one to enable AI features.');
       } else {
-        setMessage('AI features require a Google AI API Key. In this environment, please set the `API_KEY` environment variable in your hosting platform (e.g., Netlify, Vercel) settings.');
+        // Fix: Update message to refer to `API_KEY` instead of `VITE_API_KEY`.
+        setMessage('AI features require a Google AI API Key. In this environment, please ensure the `API_KEY` environment variable is configured in your deployment platform (e.g., Netlify, Vercel) settings.');
       }
     }
   }, []); // No dependencies for checkApiKey itself, it should be stable
@@ -137,7 +140,7 @@ const ConvertTextScreen: React.FC<ConvertTextScreenProps> = ({ navigateTo }) => 
       case 'JSON': return 'JSON data';
       case 'CSS': return 'CSS stylesheets';
       case 'JS': return 'JavaScript code';
-      case 'XML': 'XML markup';
+      case 'XML': return 'XML markup';
       case 'CSV': return 'Comma Separated Values';
       case 'YAML': return 'YAML data';
       default: return 'unspecified format';
@@ -207,7 +210,7 @@ const ConvertTextScreen: React.FC<ConvertTextScreenProps> = ({ navigateTo }) => 
 
     try {
       setIsConvertingAI(true);
-      // Create GoogleGenAI instance right before API call
+      // Fix: Create GoogleGenAI instance using `process.env.API_KEY` as per coding guidelines.
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string }); 
       const formatDescription = getFileFormatDescription(selectedFormat);
       const inputFormatDescription = selectedFile?.name ? getFileFormatDescription(detectFileFormat(selectedFile.name, selectedFile.mimeType)) : 'plain text';
@@ -280,7 +283,7 @@ ${editorContent}
     setMessage('Generating Android UI XML and Kotlin code from image...');
 
     try {
-      // Create GoogleGenAI instance right before API call
+      // Fix: Create GoogleGenAI instance using `process.env.API_KEY` as per coding guidelines.
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
       // Remove "data:image/jpeg;base64," prefix from base64 string
       const base64Stripped = selectedImageBase64.split(',')[1]; 
@@ -466,7 +469,7 @@ Do not include any other introductory or concluding text outside of the requeste
           <p className="text-sm mb-3">
             {isAistudioEnv
               ? 'AI features (conversion, image-to-code) need an API key. Please select an API key to enable these functionalities.'
-              : 'AI features (conversion, image-to-code) need an API key. In this environment, please set the `API_KEY` environment variable in your hosting platform (e.g., Netlify, Vercel) settings.'
+              : 'AI features (conversion, image-to-code) need an API key. In this environment, please ensure the `API_KEY` environment variable is configured in your deployment platform (e.g., Netlify, Vercel) settings.'
             }
           </p>
           <p className="text-xs mb-4">
