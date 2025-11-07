@@ -9,25 +9,43 @@ const SettingsTab: React.FC = () => {
   const checkApiKey = useCallback(async () => {
     setMessage(null); // Clear messages when re-checking
     setApiKeyStatus('checking');
+
+    const isAistudioEnvironment = typeof window.aistudio !== 'undefined' && typeof window.aistudio.hasSelectedApiKey === 'function';
+    let keyIsConfigured = false;
+
+    // Check process.env.API_KEY first (for external deployments like Netlify)
     if (process.env.API_KEY && process.env.API_KEY.length > 0) {
+      keyIsConfigured = true;
+    } 
+    // Then check window.aistudio for AI Studio environment
+    else if (isAistudioEnvironment) {
+      try {
+        keyIsConfigured = await window.aistudio.hasSelectedApiKey();
+      } catch (error) {
+        console.error("Error checking aistudio API key:", error);
+        keyIsConfigured = false; // Assume not available if there's an error
+      }
+    }
+
+    if (keyIsConfigured) {
       setApiKeyStatus('available');
-      setMessage('API Key is currently available and configured.');
-    } else if (window.aistudio && await window.aistudio.hasSelectedApiKey()) {
-      // Optimistically assume it will be available via injection
-      setApiKeyStatus('available');
-      setMessage('An API Key has been selected and should be available for AI features.');
+      setMessage('API Key is configured and available.');
     } else {
       setApiKeyStatus('missing');
-      setMessage('No Google AI API Key detected. AI features will not function without one.');
+      if (isAistudioEnvironment) {
+        setMessage('No Google AI API Key detected. Please select one to enable AI features.');
+      } else {
+        setMessage('No Google AI API Key detected. For this environment, configure your API Key as an environment variable (e.g., `API_KEY`) in your deployment platform (e.g., Netlify, Vercel) settings.');
+      }
     }
-  }, []);
+  }, []); // No dependencies for checkApiKey itself, it should be stable
 
   useEffect(() => {
     checkApiKey();
-  }, [checkApiKey]);
+  }, []); // Run on mount
 
   const handleSelectApiKey = useCallback(async () => {
-    if (window.aistudio) {
+    if (typeof window.aistudio !== 'undefined' && typeof window.aistudio.openSelectKey === 'function') {
       setMessage('Opening API Key selection dialog...');
       try {
         await window.aistudio.openSelectKey();
@@ -40,9 +58,11 @@ const SettingsTab: React.FC = () => {
         setApiKeyStatus('missing'); // Revert if something went wrong
       }
     } else {
-      setMessage('API Key selection not supported in this environment.');
+      setMessage('API Key selection is not supported in this environment (window.aistudio is unavailable).');
     }
   }, []);
+
+  const isAistudioEnv = typeof window.aistudio !== 'undefined' && typeof window.aistudio.openSelectKey === 'function';
 
   return (
     <div className="flex flex-col flex-1 p-4 gap-6">
@@ -68,12 +88,14 @@ const SettingsTab: React.FC = () => {
             <p className="text-red-600 dark:text-red-400 text-sm mb-3">
               Status: <span className="font-semibold">Missing</span>
             </p>
-            <button
-              onClick={handleSelectApiKey}
-              className="flex w-full items-center justify-center gap-x-2 rounded-lg bg-primary px-6 py-3 text-base font-bold text-white shadow-lg transition-colors hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background-dark mb-3">
-              <span className="material-symbols-outlined">key</span>
-              Select API Key
-            </button>
+            {isAistudioEnv && ( // Only show button if in AI Studio environment
+              <button
+                onClick={handleSelectApiKey}
+                className="flex w-full items-center justify-center gap-x-2 rounded-lg bg-primary px-6 py-3 text-base font-bold text-white shadow-lg transition-colors hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background-dark mb-3">
+                <span className="material-symbols-outlined">key</span>
+                Select API Key
+              </button>
+            )}
           </>
         )}
         {message && (

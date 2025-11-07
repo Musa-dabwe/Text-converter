@@ -47,39 +47,59 @@ const ConvertTextScreen: React.FC<ConvertTextScreenProps> = ({ navigateTo }) => 
   // API Key Management State
   const [apiKeyStatus, setApiKeyStatus] = useState<ApiKeyStatus>('checking');
 
-  useEffect(() => {
-    const checkApiKey = async () => {
-      // Clear previous messages related to API key when re-checking
-      if (apiKeyStatus === 'missing') setMessage(null); 
-      
-      if (process.env.API_KEY && process.env.API_KEY.length > 0) {
-        setApiKeyStatus('available');
-      } else if (window.aistudio && await window.aistudio.hasSelectedApiKey()) {
-        // Assume key is available or will be injected if selected via dialog
-        setApiKeyStatus('available');
-      } else {
-        setApiKeyStatus('missing');
-        setMessage('AI features require a Google AI API Key.');
+  const checkApiKey = useCallback(async () => {
+    setMessage(null); // Clear messages when re-checking
+    setApiKeyStatus('checking');
+
+    const isAistudioEnvironment = typeof window.aistudio !== 'undefined' && typeof window.aistudio.hasSelectedApiKey === 'function';
+    let keyIsConfigured = false;
+
+    // Check process.env.API_KEY first (for external deployments like Netlify)
+    if (process.env.API_KEY && process.env.API_KEY.length > 0) {
+      keyIsConfigured = true;
+    } 
+    // Then check window.aistudio for AI Studio environment
+    else if (isAistudioEnvironment) {
+      try {
+        keyIsConfigured = await window.aistudio.hasSelectedApiKey();
+      } catch (error) {
+        console.error("Error checking aistudio API key:", error);
+        keyIsConfigured = false; // Assume not available if there's an error
       }
-    };
+    }
+
+    if (keyIsConfigured) {
+      setApiKeyStatus('available');
+      setMessage('API Key is configured and available.');
+    } else {
+      setApiKeyStatus('missing');
+      if (isAistudioEnvironment) {
+        setMessage('AI features require a Google AI API Key. Please select one to enable AI features.');
+      } else {
+        setMessage('AI features require a Google AI API Key. In this environment, please set the `API_KEY` environment variable in your hosting platform (e.g., Netlify, Vercel) settings.');
+      }
+    }
+  }, []); // No dependencies for checkApiKey itself, it should be stable
+
+  useEffect(() => {
     checkApiKey();
-  }, [apiKeyStatus]); // Re-run if apiKeyStatus changes to re-evaluate after selection
+  }, []); // Run on mount
 
   const handleSelectApiKey = useCallback(async () => {
-    if (window.aistudio) {
+    if (typeof window.aistudio !== 'undefined' && typeof window.aistudio.openSelectKey === 'function') {
       setMessage('Opening API Key selection dialog...');
       try {
         await window.aistudio.openSelectKey();
         // Optimistically assume success due to race condition guidance
         setApiKeyStatus('available');
-        setMessage('API Key selected successfully!');
+        setMessage('API Key selected successfully! It should now be available for AI features.');
       } catch (error) {
         console.error('Error opening API key selection:', error);
         setMessage('Failed to open API Key selection. Please try again.');
         setApiKeyStatus('missing'); // Revert if something went wrong opening the dialog
       }
     } else {
-      setMessage('API Key selection not supported in this environment.');
+      setMessage('API Key selection is not supported in this environment (window.aistudio is unavailable).');
     }
   }, []);
 
@@ -176,7 +196,7 @@ const ConvertTextScreen: React.FC<ConvertTextScreenProps> = ({ navigateTo }) => 
       return;
     }
     if (apiKeyStatus !== 'available') {
-      setMessage('API Key not available. Please select an API key to enable AI conversion.');
+      setMessage('API Key not available. Please configure your API key to enable AI conversion.');
       return;
     }
 
@@ -251,7 +271,7 @@ ${editorContent}
       return;
     }
     if (apiKeyStatus !== 'available') {
-      setMessage('API Key not available. Please select an API key to enable AI image-to-code generation.');
+      setMessage('API Key not available. Please configure your API key to enable AI image-to-code generation.');
       return;
     }
 
@@ -339,6 +359,8 @@ Do not include any other introductory or concluding text outside of the requeste
   const isSaveDisabled = loading || isConvertingAI || isGeneratingImageCode || apiKeyStatus !== 'available';
   const isImageGenerateDisabled = isSaveDisabled || !selectedImageBase64;
   const isUploadDisabled = loading || apiKeyStatus !== 'available'; // Disable file input if no API key
+
+  const isAistudioEnv = typeof window.aistudio !== 'undefined' && typeof window.aistudio.openSelectKey === 'function';
 
   // Custom components for ReactMarkdown to apply Tailwind CSS
   const markdownComponents = {
@@ -442,17 +464,22 @@ Do not include any other introductory or concluding text outside of the requeste
             <h2 className="font-bold text-lg">Google AI API Key Required</h2>
           </div>
           <p className="text-sm mb-3">
-            AI features (conversion, image-to-code) need an API key. Please select an API key to enable these functionalities.
+            {isAistudioEnv
+              ? 'AI features (conversion, image-to-code) need an API key. Please select an API key to enable these functionalities.'
+              : 'AI features (conversion, image-to-code) need an API key. In this environment, please set the `API_KEY` environment variable in your hosting platform (e.g., Netlify, Vercel) settings.'
+            }
           </p>
           <p className="text-xs mb-4">
             Learn more about billing <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-red-700 dark:text-red-300 underline hover:no-underline">here</a>.
           </p>
-          <button
-            onClick={handleSelectApiKey}
-            className="flex w-full items-center justify-center gap-x-2 rounded-lg bg-red-600 px-6 py-3 text-base font-bold text-white shadow-lg transition-colors hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-background-dark">
-            <span className="material-symbols-outlined">key</span>
-            Select API Key
-          </button>
+          {isAistudioEnv && (
+            <button
+              onClick={handleSelectApiKey}
+              className="flex w-full items-center justify-center gap-x-2 rounded-lg bg-red-600 px-6 py-3 text-base font-bold text-white shadow-lg transition-colors hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-background-dark">
+              <span className="material-symbols-outlined">key</span>
+              Select API Key
+            </button>
+          )}
         </div>
       )}
 
@@ -536,7 +563,7 @@ Do not include any other introductory or concluding text outside of the requeste
                 className="markdown-output bg-card-light dark:bg-card-dark rounded-lg p-4 font-mono text-sm overflow-auto max-h-[500px] border border-border-light dark:border-border-dark"
               >
                 {apiKeyStatus !== 'available' && !imageConversionResult ? (
-                   <span className="text-subtext-light dark:text-subtext-dark">Please select an API key to enable AI code generation.</span>
+                   <span className="text-subtext-light dark:text-subtext-dark">Please configure your API key to enable AI code generation.</span>
                 ) : imageConversionResult ? (
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
